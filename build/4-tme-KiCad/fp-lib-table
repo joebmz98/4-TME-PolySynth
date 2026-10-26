@@ -1,0 +1,4 @@
+(fp_lib_table
+  (version 7)
+  (lib (name "rotaryencoder")(type "KiCad")(uri "${KIPRJMOD}/rotaryencoder.pretty")(options "")(descr ""))
+)
