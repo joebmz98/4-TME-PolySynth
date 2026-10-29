@@ -1,5 +1,5 @@
 /*
-  4-TME PolySynth prototype v15.1 — 4 voices, 16 encoders, OLED menu, shift / voice groups, MIDI in
+  4-TME PolySynth prototype v15.6 — 4 voices, 16 encoders, OLED menu, shift / voice groups, MIDI in
   Daisy Seed / DaisyDuino (Arduino IDE)
 
   Per voice: VariableShape osc (tri>saw>sq>PWM) -> MoogLadder LPF -> ADSR VCA -> pan/level
@@ -16,6 +16,13 @@
                      next time. While SHIFT is held the LEDs show the group.
   Menu encoder       press = open the menu, turn = scroll, press = select / confirm
   BACK button        cancel / go up one level
+  BACK (hold) + voice button, on the main screen: mute / unmute that voice.
+                     A muted voice fades out in ~10 ms (no click) and stays in the
+                     round-robin, so the note pattern doesn't shift; it's just silent.
+                     While BACK is held the label reads MUTE and the LEDs show the
+                     voices that are playing. Otherwise a muted voice's LED doesn't
+                     flash and its planet is drawn hollow. Mutes are remembered at
+                     power-up (last state), not stored in presets.
   SHIFT only acts as the "edit several voices" modifier on the main screen.
   In the menus it is a plain modifier (used for naming presets).
   Voice LEDs (PWM)   follow each voice's amp envelope, DCLK style:
@@ -46,7 +53,13 @@
     3. "4-TME" wipes in above the bars, all four LEDs flash, then the main screen
 
   MENU (styled on DCLK: Picopixel font, ">" cursor, two rows per page)
-    PRESETS   32 slots, Model:Cycles style. Empty slots show "1. - - -".
+    PRESETS   "INIT" at the top, then 32 slots, Model:Cycles style. Empty slots
+              show "1. - - -".
+              INIT -> CONFIRM resets every voice to the INIT sound (PARAM_DEFAULT):
+                filter fully open, resonance 0, no LFO / envelope modulation,
+                LFO 2 Hz, attack 1 ms (shortest), decay 48 ms, sustain 50 %,
+                release 48 ms (closest steps to 50 ms), saw, level 80 %, pan centre.
+              It's also the sound a unit with blank flash powers up with.
               Press a slot:  empty -> SAVE
                              used  -> LOAD / SAVE (overwrite) / CLEAR
               SAVE asks for a name (up to 5 characters) first:
@@ -59,9 +72,13 @@
                 Previewed live while editing, restored if you press BACK.
                 LED_PWM 1 (default): hardware PWM on the LED pins (analogWrite)
                 LED_PWM 0: plain on/off.   LED_PWM 2: ledDriverWrite() hook (PCA9685)
+      VALUES    ON: turning an encoder shows that parameter's name and value
+                OFF: the main screen keeps showing the art while you edit
       DISPLAY   screen timeout OFF / 1 / 5 / 10 / 30 min. After the timeout the
                 panel switches off; any control wakes it (the menu encoder's
-                first touch only wakes, voice controls wake AND act)
+                first touch only wakes, voice controls wake AND act). Incoming
+                MIDI notes wake it too and keep it awake while you play (pitch
+                bend / clock don't, so a bend stream can't keep it on forever).
 
   STORAGE: external W25Q64 SPI flash (8 MB), same chip and command set as the
   MC8P MkII. Settings (MIDI IN, LEDS, DISPLAY) are saved half a second after
@@ -71,6 +88,13 @@
   Flash layout (4 KB sectors):
     sector 0          global settings
     sector 1 + n      preset n (n = 0 .. NUM_PRESETS-1): name + all 16 params x 4 voices
+    sectors 128-143   last state: the sound as it was when you switched off
+  LAST STATE: STATE_SAVE_DELAY_MS after the last encoder change or preset load,
+  every parameter of every voice (+ the selected voice) is saved, and it's
+  restored at power-up. Saves rotate through 16 sectors (newest = highest
+  sequence number), so the flash wears 16x slower and a power cut mid-save
+  just falls back to the previous state. Changes made in the last couple of
+  seconds before switching off may not be saved yet.
   The preset list (used / name) is read once at boot so the menu scrolls instantly.
   No chip found at boot -> the splash shows "NO FLASH" and nothing is saved.
 
@@ -194,6 +218,9 @@ const int FLASH_MOSI = D10;
 #endif
 #define NUM_PRESETS        32
 #define SETTINGS_SAVE_DELAY_MS 500     // save this long after the last confirmed change
+#define STATE_SAVE_DELAY_MS    2000    // save the sound this long after the last edit
+#define STATE_BASE_SECTOR      128     // 0x080000: well clear of settings and presets
+#define STATE_SECTORS          16      // ring size (wear levelling)
 const int PIN_OLED_SCL = D11;
 const int PIN_OLED_SDA = D12;
 #define MIDI_RX_PIN D30          // PB15, USART1 RX (alternate)
@@ -218,11 +245,12 @@ const int16_t PARAM_MAX[P_COUNT] = {
     0, 100, 100, 100,
   100, 100, 100, 100
 };
+// INIT sound (PRESETS > INIT, and power-up with blank flash)
 const int16_t PARAM_DEFAULT[P_COUNT] = {
   120,  50,  48,   0,     // tune 0, saw, pitch env 0, no pitch LFO
-   56,  33,  50,   0,     // cutoff ~1 kHz, res 0.3, cutoff env 0, no cutoff LFO
-    0,  17,  62,  70,     // -, attack 5 ms, decay 300 ms, sustain 70 %
-   62,  66,  50,  80      // release 300 ms, LFO ~3 Hz, pan centre, level 80 %
+   98,   0,  50,   0,     // cutoff fully open (17.8 kHz), res 0, cutoff env 0, no cutoff LFO
+    0,   0,  42,  50,     // -, attack 1 ms (shortest), decay 48 ms, sustain 50 %
+   42,  59,  50,  80      // release 48 ms, LFO 1.98 Hz, pan centre, level 80 %
 };
 // Per-encoder direction flip (1 = reversed) so clockwise always increases.
 const bool ENC_INVERT[P_COUNT] = {
@@ -241,12 +269,13 @@ enum UiScreen : uint8_t {
   UI_MAIN,
   UI_TOP,                                    // PRESETS / SETTINGS
   UI_PRESETS, UI_PRESET_ACTION, UI_NAME,     // slot list, LOAD/SAVE/CLEAR, name entry
-  UI_SETTINGS, UI_EDIT_MIDI, UI_EDIT_LEDS, UI_EDIT_DISPLAY
+  UI_INIT,                                   // INIT confirm
+  UI_SETTINGS, UI_EDIT_MIDI, UI_EDIT_LEDS, UI_EDIT_VALUES, UI_EDIT_DISPLAY
 };
 enum TopItem : uint8_t { TI_PRESETS, TI_SETTINGS, TI_COUNT };
 const char *TOP_LABEL[TI_COUNT] = { "PRESETS", "SETTINGS" };
-enum MenuItem : uint8_t { MI_MIDI, MI_LEDS, MI_DISPLAY, MI_COUNT };
-const char *MENU_LABEL[MI_COUNT] = { "MIDI", "LEDS", "DISPLAY" };
+enum MenuItem : uint8_t { MI_MIDI, MI_LEDS, MI_VALUES, MI_DISPLAY, MI_COUNT };
+const char *MENU_LABEL[MI_COUNT] = { "MIDI", "LEDS", "VALUES", "DISPLAY" };
 enum PresetAction : uint8_t { PA_LOAD, PA_SAVE, PA_CLEAR };
 const char *ACTION_LABEL[] = { "LOAD", "SAVE", "CLEAR" };
 
@@ -289,7 +318,19 @@ struct StoredSettings {
   uint32_t magic;
   uint8_t  version;
   uint8_t  midiChannel, ledLevel, saverIdx;
-  uint8_t  reserved[8];                // room for more settings without a version bump
+  uint8_t  hideValues;                 // VALUES setting, stored inverted so older saves (0) read as ON
+  uint8_t  reserved[7];                // room for more settings without a version bump
+  uint32_t checksum;
+};
+#define STATE_VERSION 1
+struct StoredState {                   // last sound, for power-up
+  uint32_t magic;
+  uint8_t  version;
+  uint8_t  selVoice;
+  uint8_t  muteMask;                   // bit per voice (older saves: 0 = none muted)
+  uint8_t  reserved[1];
+  uint32_t seq;                        // increases with every save; the highest valid one wins
+  int16_t  param[4][16];
   uint32_t checksum;
 };
 struct StoredPreset {
@@ -303,6 +344,7 @@ struct StoredPreset {
 
 static_assert(NUM_VOICES == 4 && P_COUNT == 16, "StoredPreset layout assumes 4 voices x 16 params");
 static_assert(sizeof(StoredPreset) <= 256, "a preset must fit the flash write buffer");
+static_assert(sizeof(StoredState) <= 256, "the state must fit the flash write buffer");
 
 struct VoiceSettings {
   volatile float tune, wave, pitchEnv, pitchLfo;
@@ -333,6 +375,7 @@ uint8_t midiChannel = 0;     // 0 = OMNI, 1-16
 uint8_t ledLevel    = 1;     // MID
 uint8_t ledLevelOrig = 1;    // restored if the LEDS edit is cancelled
 uint8_t saverIdx    = 2;     // 5 min
+uint8_t showValues  = 1;     // VALUES: 1 = show the parameter readout while editing
 
 // ------------------------------------------------------------------ voice
 struct Voice {
@@ -359,6 +402,8 @@ struct Voice {
   float gLC, gRC;
   float lfoVal = 0.0f;
   volatile float envOut = 0.0f;           // current amp envelope 0..1 (for the LEDs)
+  volatile bool  muted  = false;          // BACK + voice button
+  float muteC = 1.0f;                     // smoothed mute gain (fades in / out, no click)
   bool  g = false;
   float baseNote = 60.0f;
 
@@ -449,11 +494,12 @@ struct Voice {
     }
     gLC += smoothK * (set.gainL - gLC);
     gRC += smoothK * (set.gainR - gRC);
+    muteC += smoothK * ((muted ? 0.0f : 1.0f) - muteC);
 #if FILTER_TYPE == 1
     filt.Process(oscOut());
-    return filt.Low() * e;
+    return filt.Low() * e * muteC;
 #else
-    return filt.Process(oscOut()) * e;
+    return filt.Process(oscOut()) * e * muteC;
 #endif
   }
 };
@@ -730,6 +776,7 @@ void loadSettings() {
   if (st.midiChannel <= 16)          midiChannel = st.midiChannel;
   if (st.ledLevel < N_LED_LEVELS)    ledLevel    = st.ledLevel;
   if (st.saverIdx < N_SAVER)         saverIdx    = st.saverIdx;
+  showValues = st.hideValues ? 0 : 1;
 }
 
 void serviceSettingsSave() {
@@ -739,6 +786,7 @@ void serviceSettingsSave() {
   memset(&st, 0, sizeof(st));
   st.magic = FLASH_MAGIC; st.version = FLASH_VERSION;
   st.midiChannel = midiChannel; st.ledLevel = ledLevel; st.saverIdx = saverIdx;
+  st.hideValues = showValues ? 0 : 1;
   st.checksum = checksum32((const uint8_t *)&st, offsetof(StoredSettings, checksum));
   if (flashStartWrite(SETTINGS_ADDR, &st, sizeof(st)) || !flashOk) settingsSavePending = false;
 }
@@ -813,8 +861,19 @@ void queuePresetOp(PresetOp op, uint8_t slot, const char *name) {
 }
 
 void showToast(const char *l1, const char *l2);   // defined with the UI below
+void markStateDirty();                             // defined with the last-state code below
 
 void presetSlotText(uint8_t slot, char *buf, size_t n);
+
+// PRESETS > INIT: every voice back to the INIT sound
+void initSound() {
+  for (int v = 0; v < NUM_VOICES; v++)
+    for (int id = 0; id < P_COUNT; id++) {
+      voices[v].param[id] = PARAM_DEFAULT[id];
+      applyParam(v, id);                 // the voices' smoothing glides to it, no clicks
+    }
+  markStateDirty();                      // and it's what you'll get at the next power-up
+}
 
 void servicePresetOps() {
   if (pendingOp == OP_NONE || flashJobBusy()) return;
@@ -827,7 +886,8 @@ void servicePresetOps() {
       showToast("SAVED", t);
       break;
     case OP_LOAD:
-      showToast(loadPreset(pendingSlot) ? "LOADED" : "LOAD FAILED", t);
+      if (loadPreset(pendingSlot)) { showToast("LOADED", t); markStateDirty(); }
+      else                           showToast("LOAD FAILED", t);
       break;
     case OP_CLEAR:
       if (!startPresetClear(pendingSlot)) return;
@@ -842,7 +902,8 @@ void servicePresetOps() {
 UiScreen uiScreen  = UI_MAIN;
 uint8_t  topSel    = 0;          // PRESETS / SETTINGS
 uint8_t  menuSel   = 0;          // SETTINGS list
-uint8_t  presetSel = 0;          // preset slot list
+uint8_t  listSel   = 0;          // PRESETS list row: 0 = INIT, 1.. = slot 1..
+uint8_t  presetSel = 0;          // preset slot being acted on (0-based)
 uint8_t  actionSel = 0;          // index into the slot's action list
 char     nameBuf[NAME_LEN + 1];  // name being entered
 uint8_t  nameCursor = 0;
@@ -859,6 +920,9 @@ bool     groupStartedThisHold = false;
 
 // SHIFT edits several voices only on the main screen; in menus it's a plain modifier
 #define GROUP_MODE() (shiftHeld && uiScreen == UI_MAIN)
+bool backHeld = false;           // BACK button currently down
+// BACK held on the main screen: voice buttons mute / unmute
+#define MUTE_MODE()  (backHeld && uiScreen == UI_MAIN)
 
 int      lastParam  = -1;        // last edited parameter (-1 = none yet)
 uint32_t lastParamMs = 0;        // when it was last changed
@@ -879,6 +943,67 @@ bool wakeScreen() {
     return true;
   }
   return false;
+}
+
+// ------------------------------------------------------------------ last state (power-up = as you left it)
+bool     stateDirty   = false;
+uint32_t stateEditMs  = 0;
+uint32_t stateSeq     = 0;             // sequence number of the newest saved state
+uint8_t  stateNext    = 0;             // ring slot the next save goes to
+
+void markStateDirty() { stateDirty = true; stateEditMs = millis(); }
+
+uint32_t stateAddr(uint8_t i) { return 0x1000UL * (STATE_BASE_SECTOR + i); }
+
+bool readState(uint8_t i, StoredState &st) {
+  flashRead(stateAddr(i), (uint8_t *)&st, sizeof(st));
+  if (st.magic != FLASH_MAGIC || st.version != STATE_VERSION) return false;
+  return st.checksum == checksum32((const uint8_t *)&st, offsetof(StoredState, checksum));
+}
+
+// boot: find the newest valid state in the ring and apply it to the voices
+void loadState() {
+  if (!flashOk) return;
+  StoredState st, best;
+  int bestIdx = -1;
+  for (uint8_t i = 0; i < STATE_SECTORS; i++)
+    if (readState(i, st) && (bestIdx < 0 || (int32_t)(st.seq - best.seq) > 0)) { best = st; bestIdx = i; }
+  if (bestIdx < 0) return;                       // nothing saved yet: keep the defaults
+  stateSeq  = best.seq;
+  stateNext = (bestIdx + 1) % STATE_SECTORS;
+  for (int v = 0; v < NUM_VOICES; v++) {
+    for (int id = 0; id < P_COUNT; id++) {
+      int16_t p = best.param[v][id];
+      if (p < 0) p = 0;
+      if (p > PARAM_MAX[id]) p = PARAM_MAX[id];
+      voices[v].param[id] = p;
+    }
+    for (int id = 0; id < P_COUNT; id++) applyParam(v, id);
+    voices[v].settle();                          // start there, no glide at power-up
+  }
+  if (best.selVoice < NUM_VOICES) selVoice = best.selVoice;
+  for (int v = 0; v < NUM_VOICES; v++) {
+    voices[v].muted = (best.muteMask >> v) & 1;
+    voices[v].muteC = voices[v].muted ? 0.0f : 1.0f;
+  }
+}
+
+void serviceStateSave() {
+  if (!stateDirty || !flashOk || millis() - stateEditMs < STATE_SAVE_DELAY_MS) return;
+  if (flashJobBusy() || pendingOp != OP_NONE || settingsSavePending) return;   // let those go first
+  StoredState st;
+  memset(&st, 0, sizeof(st));
+  st.magic = FLASH_MAGIC; st.version = STATE_VERSION;
+  st.selVoice = selVoice;
+  for (int v = 0; v < NUM_VOICES; v++) if (voices[v].muted) st.muteMask |= 1 << v;
+  st.seq = stateSeq + 1;
+  for (int v = 0; v < NUM_VOICES; v++)
+    for (int id = 0; id < P_COUNT; id++) st.param[v][id] = voices[v].param[id];
+  st.checksum = checksum32((const uint8_t *)&st, offsetof(StoredState, checksum));
+  if (!flashStartWrite(stateAddr(stateNext), &st, sizeof(st))) return;
+  stateSeq = st.seq;
+  stateNext = (stateNext + 1) % STATE_SECTORS;
+  stateDirty = false;
 }
 
 // ------------------------------------------------------------------ LEDs
@@ -935,14 +1060,17 @@ void updateLeds() {
 
   for (int i = 0; i < NUM_VOICES; i++) {
     if (ledFlashing[i] && now - ledFlashStart[i] >= LED_FLASH_MS) ledFlashing[i] = false;
-    bool lit = GROUP_MODE() ? ((shiftGroup >> i) & 1) : (i == selVoice);
+    bool lit = MUTE_MODE()  ? !voices[i].muted                 // BACK held: playing voices lit
+             : GROUP_MODE() ? ((shiftGroup >> i) & 1)
+             :                (i == selVoice);
     bool dimmable = (LED_PWM == 2) || (LED_PWM == 1 && ledHasPwm[i]);
 
     if (dimmable) {
       // follow the envelope; throttled, and no encoder blanking: a duty change
       // doesn't add switching edges (the PWM is switching all the time anyway)
       if (!pwmTick && ledOut[i] >= 0) continue;
-      int16_t value = ledBrightness(lit, voices[i].envOut);
+      float env = voices[i].muted ? 0.0f : voices[i].envOut;   // a muted voice doesn't flash
+      int16_t value = ledBrightness(lit, env);
       if (ledOut[i] != value) { ledWrite(i, (uint8_t)value); ledOut[i] = value; }
     } else {
       // on/off pin: lit or not, a trigger blinks it to the opposite state
@@ -973,7 +1101,10 @@ int debounce(Debounce &d, int pin) {
 
 void onVoiceButton(int i) {
   wakeScreen();                               // voice buttons act even when waking
-  if (GROUP_MODE()) {
+  if (MUTE_MODE()) {                          // BACK held: toggle this voice's mute
+    voices[i].muted = !voices[i].muted;
+    markStateDirty();
+  } else if (GROUP_MODE()) {
     if (!groupStartedThisHold) {              // first press: new group with this voice
       shiftGroup = 1 << i;
       groupStartedThisHold = true;
@@ -1056,7 +1187,7 @@ void scanEncoders() {
       int p = vc.param[i] + d;                // same amount for every voice in the group
       if (p < 0) p = 0;
       if (p > PARAM_MAX[i]) p = PARAM_MAX[i];
-      if (p != vc.param[i]) { vc.param[i] = p; applyParam(v, i); }
+      if (p != vc.param[i]) { vc.param[i] = p; applyParam(v, i); markStateDirty(); }
       if (shown < 0 || v == selVoice) shown = v;
     }
     lastParam = i;
@@ -1117,7 +1248,8 @@ void onMenuTurn(int d) {
   switch (uiScreen) {
     case UI_MAIN:          return;
     case UI_TOP:           topSel = wrapAdd(topSel, d, TI_COUNT); break;
-    case UI_PRESETS:       presetSel = wrapAdd(presetSel, d, NUM_PRESETS); break;
+    case UI_PRESETS:       listSel = wrapAdd(listSel, d, NUM_PRESETS + 1); break;      // INIT + slots
+    case UI_INIT:          return;
     case UI_PRESET_ACTION: actionSel = wrapAdd(actionSel, d, actionCount(presetSel)); break;
     case UI_NAME:
       if (shiftHeld) {                        // SHIFT + turn: change the character
@@ -1132,6 +1264,7 @@ void onMenuTurn(int d) {
     case UI_EDIT_LEDS:     editIdx = wrapAdd(editIdx, d, N_LED_LEVELS);
                            ledLevel = editIdx; ledOut[0] = ledOut[1] = ledOut[2] = ledOut[3] = -1;  // live preview
                            break;
+    case UI_EDIT_VALUES:   editIdx = wrapAdd(editIdx, d, 2); break;          // ON / OFF
     case UI_EDIT_DISPLAY:  editIdx = wrapAdd(editIdx, d, N_SAVER); break;
   }
   uiDirty = true;
@@ -1146,9 +1279,16 @@ void onMenuPress() {                          // open / select / confirm
       else                      { uiScreen = UI_SETTINGS; menuSel = 0; }
       break;
     case UI_PRESETS:
+      if (listSel == 0) { uiScreen = UI_INIT; break; }
       if (!flashOk) { showToast("NO FLASH", "CAN'T SAVE"); break; }
+      presetSel = listSel - 1;
       actionSel = 0;
       uiScreen = UI_PRESET_ACTION;
+      break;
+    case UI_INIT:
+      initSound();
+      showToast("INIT", "DEFAULT SOUND");
+      uiScreen = UI_MAIN;
       break;
     case UI_PRESET_ACTION:
       switch (actionAt(presetSel, actionSel)) {
@@ -1165,6 +1305,7 @@ void onMenuPress() {                          // open / select / confirm
       switch (menuSel) {
         case MI_MIDI:    editIdx = midiChannel; uiScreen = UI_EDIT_MIDI;    break;
         case MI_LEDS:    editIdx = ledLevel; ledLevelOrig = ledLevel; uiScreen = UI_EDIT_LEDS; break;
+        case MI_VALUES:  editIdx = showValues ? 0 : 1; uiScreen = UI_EDIT_VALUES; break;
         case MI_DISPLAY: editIdx = saverIdx;    uiScreen = UI_EDIT_DISPLAY; break;
       }
       break;
@@ -1175,6 +1316,11 @@ void onMenuPress() {                          // open / select / confirm
       ledLevel = editIdx;
       if (ledLevel != ledLevelOrig) requestSettingsSave();
       uiScreen = UI_SETTINGS; break;
+    case UI_EDIT_VALUES: {
+      uint8_t v = (editIdx == 0) ? 1 : 0;
+      if (v != showValues) { showValues = v; requestSettingsSave(); }
+      uiScreen = UI_SETTINGS; break;
+    }
     case UI_EDIT_DISPLAY:
       if (editIdx != saverIdx) { saverIdx = editIdx; requestSettingsSave(); }
       uiScreen = UI_SETTINGS; break;
@@ -1189,6 +1335,7 @@ void onBack() {                               // BACK button: cancel / up one le
     case UI_TOP:           uiScreen = UI_MAIN; break;
     case UI_PRESETS:       uiScreen = UI_TOP; break;
     case UI_PRESET_ACTION: uiScreen = UI_PRESETS; break;
+    case UI_INIT:          uiScreen = UI_PRESETS; break;         // nothing changed
     case UI_NAME:          uiScreen = UI_PRESET_ACTION; break;   // cancelled: nothing saved
     case UI_SETTINGS:      uiScreen = UI_TOP; break;
     case UI_EDIT_LEDS:                        // undo the live preview
@@ -1224,6 +1371,8 @@ void scanMenuControls() {
   // buttons act on press
   if (debounce(menuBtn, PIN_MENU_BTN) == 1) onMenuPress();
   if (debounce(backBtn, PIN_BACK) == 1)     onBack();
+  bool held = (backBtn.stable == LOW);
+  if (held != backHeld) { backHeld = held; uiDirty = true; }
 }
 
 // ------------------------------------------------------------------ screen saver
@@ -1299,6 +1448,7 @@ void saverText(uint8_t idx, char *buf, size_t n) {
 // Everything is drawn from the voices' live settings and envelopes each frame.
 const uint8_t BAYER4[16] = { 0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5 };
 #define N_STARS 28
+const float ART_VOICE_X[NUM_VOICES] = { 30.0f, 52.0f, 82.0f, 108.0f };   // planet centres (x)
 
 static inline float pnorm(int v, int id) { return PARAM_MAX[id] ? (float)voices[v].param[id] / PARAM_MAX[id] : 0.0f; }
 
@@ -1337,10 +1487,11 @@ void drawArt() {
   // one planet per voice
   for (int v = 0; v < NUM_VOICES; v++) {
     Voice &vc = voices[v];
-    float env   = clampf(vc.envOut, 0.0f, 1.0f);
+    bool  muted = vc.muted;
+    float env   = muted ? 0.0f : clampf(vc.envOut, 0.0f, 1.0f);   // muted: no pulse
     float level = pnorm(v, P_LEVEL);
     float pan   = pnorm(v, P_PAN) * 2.0f - 1.0f;
-    float cx    = 22.0f + v * 28.0f + pan * 6.0f;
+    float cx    = ART_VOICE_X[v] + pan * 6.0f;
     float cy    = 19.0f - clampf(vc.set.tune / 12.0f, -1.0f, 1.0f) * 3.0f;
     float r     = 2.0f + 3.0f * level + 5.5f * env;
 
@@ -1374,7 +1525,8 @@ void drawArt() {
         float edge = rr * apo / cosf(ph - sector * 0.5f);      // regular polygon radius at this angle
         if (d > edge) continue;
         bool outline = d > edge - 1.0f;
-        if (outline || BAYER4[(y & 3) * 4 + (x & 3)] < thresh) display.drawPixel(x, y, SSD1306_WHITE);
+        if (outline || (!muted && BAYER4[(y & 3) * 4 + (x & 3)] < thresh))   // muted: hollow
+          display.drawPixel(x, y, SSD1306_WHITE);
         else display.drawPixel(x, y, SSD1306_BLACK);           // planets hide the stars behind them
       }
     }
@@ -1411,8 +1563,9 @@ void drawUI() {
   char buf[24], who[16];
 
   // who the encoders edit: "V2", or "S ALL" / "S 1+3" while SHIFT is held
-  if (GROUP_MODE()) { groupText(buf, sizeof(buf)); snprintf(who, sizeof(who), "S %s", buf); }
-  else           snprintf(who, sizeof(who), "V%d", selVoice + 1);
+  if (MUTE_MODE())        snprintf(who, sizeof(who), "MUTE");
+  else if (GROUP_MODE()) { groupText(buf, sizeof(buf)); snprintf(who, sizeof(who), "S %s", buf); }
+  else                    snprintf(who, sizeof(who), "V%d", selVoice + 1);
 
   if (toastUntil) {                           // SAVED / LOADED / CLEARED message
     display.setTextSize(3);
@@ -1424,7 +1577,7 @@ void drawUI() {
   switch (uiScreen) {
     case UI_MAIN: {
       uint32_t now = millis();
-      if (lastParam >= 0 && now - lastParamMs < PARAM_HOLD_MS) {          // being turned
+      if (showValues && lastParam >= 0 && now - lastParamMs < PARAM_HOLD_MS) {   // being turned
         display.setTextSize(2);
         display.setCursor(0, 10);
         display.print(PARAM_LABEL[lastParam]);
@@ -1461,24 +1614,27 @@ void drawUI() {
       break;
     }
 
-    case UI_PRESETS: {                        // slot list, two per page
-      if (!flashOk) {
-        display.setTextSize(3);
-        display.setCursor(0, 12); display.print("PRESETS");
-        display.setCursor(0, 29); display.print("NO FLASH");
-        break;
-      }
-      uint8_t top = presetSel & ~1;
+    case UI_PRESETS: {                        // INIT, then the slots, two rows per page
+      uint8_t top = listSel & ~1;
       for (uint8_t row = 0; row < 2; row++) {
-        uint8_t slot = top + row;
-        if (slot >= NUM_PRESETS) break;
+        uint8_t idx = top + row;
+        if (idx > NUM_PRESETS) break;
         int16_t y = row ? 29 : 12;
         display.setTextSize(3);
         display.setCursor(0, y);
-        display.print(slot == presetSel ? "> " : "  ");
-        presetSlotText(slot, buf, sizeof(buf));
-        printFit(buf, y);
+        display.print(idx == listSel ? "> " : "  ");
+        if (idx == 0) display.print("INIT");
+        else { presetSlotText(idx - 1, buf, sizeof(buf)); printFit(buf, y); }
       }
+      break;
+    }
+
+    case UI_INIT: {                           // press again to confirm, BACK to cancel
+      display.setTextSize(3);
+      display.setCursor(0, 12);
+      display.print("INIT");
+      display.setCursor(0, 29);
+      display.print("> CONFIRM");
       break;
     }
 
@@ -1519,15 +1675,18 @@ void drawUI() {
 
     case UI_EDIT_MIDI:
     case UI_EDIT_LEDS:
+    case UI_EDIT_VALUES:
     case UI_EDIT_DISPLAY: {                   // DCLK edit screen: title, then "SET >" value
       display.setTextSize(3);
       display.setCursor(0, 12);
       display.print(">");
-      display.print(uiScreen == UI_EDIT_MIDI ? "MIDI" : uiScreen == UI_EDIT_LEDS ? "LEDS" : "DISPLAY");
+      display.print(uiScreen == UI_EDIT_MIDI ? "MIDI" : uiScreen == UI_EDIT_LEDS ? "LEDS" :
+                    uiScreen == UI_EDIT_VALUES ? "VALUES" : "DISPLAY");
       display.setCursor(0, 29);
       display.print("SET >");
       if (uiScreen == UI_EDIT_MIDI)    midiChannelText(editIdx, buf, sizeof(buf));
       if (uiScreen == UI_EDIT_LEDS)    snprintf(buf, sizeof(buf), "%s", LED_LEVELS[editIdx].name);
+      if (uiScreen == UI_EDIT_VALUES)  snprintf(buf, sizeof(buf), "%s", editIdx == 0 ? "ON" : "OFF");
       if (uiScreen == UI_EDIT_DISPLAY) saverText(editIdx, buf, sizeof(buf));
       drawRightAligned(buf, 29);
       break;
@@ -1603,8 +1762,9 @@ void noteOn(uint8_t n) {
   nextVoice = (nextVoice + 1) % NUM_VOICES;
   Voice &vc = voices[v];
   vc.note = n; vc.heldNote = n; vc.trigCount++; vc.gate = true;
+  wakeScreen();                               // a note wakes the display (and resets the timeout)
   updateNoteLed();
-  flashVoiceLed(v);
+  if (!vc.muted) flashVoiceLed(v);
 }
 
 void noteOff(uint8_t n) {
@@ -1759,6 +1919,7 @@ void setup() {
   flashInit();
   loadSettings();
   scanPresets();
+  loadState();                                // the sound as it was when switched off
 
   // OLED (blocking transfers are fine here, before audio and MIDI start)
   Wire.setSCL(PIN_OLED_SCL);
@@ -1800,6 +1961,7 @@ void loop() {
   serviceDisplay();                           // at most one small I2C chunk per pass
   serviceSettingsSave();
   servicePresetOps();
+  serviceStateSave();
   flashService();                             // background erase / program, never waits
   processScreenSaver();
 
