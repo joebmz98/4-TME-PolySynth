@@ -10547,7 +10547,7 @@
 			)
 		)
 	)
-	(global_label "PITCH_CV_3"
+	(global_label "PITCH_CV_4"
 		(shape input)
 		(at 181.61 245.11 0)
 		(fields_autoplaced yes)
@@ -10824,6 +10824,28 @@
 		(uuid "240d6af2-8fb2-41e9-a9a7-9ef4344c4806")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
 			(at 318.77 65.8972 90)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+				(hide yes)
+			)
+		)
+	)
+	(global_label "PITCH_CV_1"
+		(shape input)
+		(at 52.07 217.17 0)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "24a68707-5225-41c2-b039-67a13c171f81")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 66.0014 217.17 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -11115,6 +11137,28 @@
 					(size 1.27 1.27)
 				)
 				(justify right)
+				(hide yes)
+			)
+		)
+	)
+	(global_label "PITCH_CV_4"
+		(shape input)
+		(at 52.07 224.79 0)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "3e603237-0604-4dab-802f-832384e66b7b")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 66.0014 224.79 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
 				(hide yes)
 			)
 		)
@@ -12166,6 +12210,28 @@
 		(uuid "96981f6f-6472-4e01-9ce3-4264b0b75425")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
 			(at 363.22 65.8972 90)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+				(hide yes)
+			)
+		)
+	)
+	(global_label "PITCH_CV_3"
+		(shape input)
+		(at 52.07 222.25 0)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "977875ac-e3e1-4ef0-bf54-1224d2d041a9")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 66.0014 222.25 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -13332,6 +13398,28 @@
 		(uuid "d0d90a63-7ef3-43a4-b268-13ee99820540")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
 			(at 378.46 65.8972 90)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+				(hide yes)
+			)
+		)
+	)
+	(global_label "PITCH_CV_2"
+		(shape input)
+		(at 52.07 219.71 0)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "d34079a9-e854-44cc-8db4-508c41259677")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 66.0014 219.71 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -33568,7 +33656,7 @@
 				)
 			)
 		)
-		(property "Value" "PITCH CV 3"
+		(property "Value" "PITCH CV 4"
 			(at 130.175 233.68 0)
 			(effects
 				(font
