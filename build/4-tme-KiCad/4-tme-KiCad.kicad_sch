@@ -14120,6 +14120,28 @@
 			)
 		)
 	)
+	(global_label "GATE_1"
+		(shape input)
+		(at 78.74 76.2 0)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "46f27717-41d6-4cad-bd1c-668295c675e6")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 88.3775 76.2 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+				(hide yes)
+			)
+		)
+	)
 	(global_label "S1"
 		(shape input)
 		(at 78.74 83.82 0)
@@ -14287,6 +14309,28 @@
 		(uuid "57af950b-8ddc-4235-a97c-9972626cbe61")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
 			(at 262.89 150.2446 90)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+				(hide yes)
+			)
+		)
+	)
+	(global_label "GATE_4"
+		(shape input)
+		(at 27.94 83.82 180)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right)
+		)
+		(uuid "5836be1e-94bd-4102-b163-b549103583c4")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 18.3025 83.82 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -15990,6 +16034,28 @@
 			)
 		)
 	)
+	(global_label "GATE_2"
+		(shape input)
+		(at 78.74 86.36 0)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "c02d10ff-dde7-4625-b48a-3464fe0c2995")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 88.3775 86.36 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+				(hide yes)
+			)
+		)
+	)
 	(global_label "C9"
 		(shape input)
 		(at 52.07 157.48 0)
@@ -16707,6 +16773,28 @@
 		(uuid "dc07bd9c-2c60-42a3-88e6-1caea98350ca")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
 			(at 115.8942 157.48 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+				(hide yes)
+			)
+		)
+	)
+	(global_label "GATE_3"
+		(shape input)
+		(at 78.74 88.9 0)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "dea9debe-12fd-429f-af74-f86c2751bd45")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 88.3775 88.9 0)
 			(effects
 				(font
 					(size 1.27 1.27)
