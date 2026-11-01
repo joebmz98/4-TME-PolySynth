@@ -14472,6 +14472,28 @@
 			)
 		)
 	)
+	(global_label "SCL"
+		(shape input)
+		(at 78.74 55.88 0)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "70abc5ab-012f-4c7d-922c-a3a835f722b5")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 85.2328 55.88 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+				(hide yes)
+			)
+		)
+	)
 	(global_label "D3V3"
 		(shape input)
 		(at 407.67 73.66 90)
@@ -16443,6 +16465,28 @@
 		(uuid "d0d90a63-7ef3-43a4-b268-13ee99820540")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
 			(at 378.46 65.8972 90)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+				(hide yes)
+			)
+		)
+	)
+	(global_label "SDA"
+		(shape input)
+		(at 78.74 58.42 0)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "d1197aa5-d89d-430e-9c88-4637743229e2")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 85.2933 58.42 0)
 			(effects
 				(font
 					(size 1.27 1.27)
